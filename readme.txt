@@ -257,7 +257,7 @@
     )
     }
 
-5. *สร้าง route โดยการตั้งชื่อ folder ใน *****app ว่า register และสร้างไฟล์ page.js แล้วสร้าง function components ชื่ออะไรก็ได้
+5. *สร้าง route โดยการตั้งชื่อ folder ใน *****app ว่า register และสร้างไฟล์ page.js แล้วสร้าง function components ชื่ออะไรก็ได้ในที่นี้ชื่อ RegisterPage
     
     -src > app > layout.js นำ Header และ footer จาก src > app > page.js ย้ายมานี่
 
@@ -338,6 +338,230 @@
         export { handler as GET, handler as POST }
 
     จากนั้นเราต้องการ provider เป็น credentials https://next-auth.js.org/configuration/providers/credentials 
+
+    -src > app > api > auth > [...nextauth] > route.ts
+
+        import NextAuth from "next-auth"
+        import CredentialsProvider from "next-auth/providers/credentials"
+
+        const handler = NextAuth({
+            providers: [
+                CredentialsProvider({
+                // The name to display on the sign in form (e.g. 'Sign in with...')
+                name: 'Credentials',
+                credentials: {
+                    username: { label: "Email", type: "email", placeholder: "test@example.com" },
+                    password: { label: "Password", type: "password" }
+                },
+                async authorize(credentials, req) {
+                    // You need to provide your own logic here that takes the credentials
+                    // submitted and returns either a object representing a user or value
+                    // that is false/null if the credentials are invalid.
+                    // e.g. return { id: 1, name: 'J Smith', email: 'jsmith@example.com' }
+                    // You can also use the `req` object to obtain additional parameters
+                    // (i.e., the request IP address)
+                    const res = await fetch("/your/endpoint", {
+                    method: 'POST',
+                    body: JSON.stringify(credentials),
+                    headers: { "Content-Type": "application/json" }
+                    })
+                    const user = await res.json()
+            
+                    // If no error and we have user data, return it
+                    if (res.ok && user) {
+                    return user
+                    }
+                    // Return null if user data could not be retrieved
+                    return null
+                }
+                })
+            ]
+        })
+
+        export { handler as GET, handler as POST }
+
+    -src > app > api > register > route.js
+
+        export function POST(req){
+            return Response.json('OK')
+        }
+
+     -src > app > register > page.js
+
+        'use client'
+        import React, { useState } from 'react'
+        import Image from 'next/image'
+
+        const RegisterPage = () => {
+
+        const [email, setEmail] = useState('')
+        const [password, setPassword] = useState('')
+
+        function handleFormSubmit(e){
+            e.preventDefault();
+            fetch('/api/register',{
+                method: 'POST',
+                body: JSON.stringify({email, password}),
+                headers: {'Content-Type': 'application/json'}
+            })
+        }
+
+        return (
+            <section className='mt-8 mb-8'>
+                <h1 className='text-center text-primary text-4xl'>Register</h1>
+                <form className='block max-w-xs mx-auto' onSubmit={handleFormSubmit}>
+                    <input type="email" placeholder='email' value={email} onChange={e=>setEmail(e.target.value)}/>
+                    <input type="password" placeholder='password' value={password} onChange={e=>setPassword(e.target.value)}/>
+                    <button type="submit">Register</button>
+                    <div className='my-4 text-center text-gray-400'>
+                        or login with provider
+                    </div>
+                    <button className='flex gap-4 justify-center'>
+                        <Image src={'/google.png'} alt={''} width={24} height={24}/>
+                        Login with google
+                    </button>
+                </form>
+            </section>
+        )
+        }
+
+        export default RegisterPage
+    
+7. login mongodb
+
+    -npm install mongoose
+    
+    New Project > Project name: food ordering > create
+
+    Database > Free, aws, singapore > username: psworamet > password : psworamet123456
+
+    Database > connect > mongoDb for vscode > mongodb+srv://psworamet:<password>@cluster0.svyfjr2.mongodb.net/
+
+    create .env file ใน root folder
+
+        -.env
+
+            MONGO_URL="mongodb+srv://psworamet:psworamet123456@cluster0.svyfjr2.mongodb.net/"
+
+        -src > models > User.js สร้าง schema
+
+            import {model, models, Schema} from "mongoose";
+
+            const UserSchema = new Schema({
+                email: {type: String, required: true, unique: true},
+                password: {
+                    type: String,
+                    required: true
+                },
+            }, {timestamps: true});
+
+            export const User = models?.User || model('User', UserSchema);
+
+8. ทำการสร้าง route register และเรียก route register เมื่อกด submit ที่ Register Page
+
+    -src > app > api > register > route.js ทำการเข้ารหัส
+
+        import bcrypt from 'bcrypt';
+        import { User } from "@/models/User";
+        import mongoose from "mongoose";
+
+        export async function POST(req){
+            const body = await req.json();
+            mongoose.connect(process.env.MONGO_URL);
+
+            try {
+                // Hash the password before creating the user
+                const hashedPassword = await bcrypt.hash(body.password, 10);
+                const userWithHashedPassword = { ...body, password: hashedPassword };
+
+                const createdUser = await User.create(userWithHashedPassword);
+                console.log(createdUser);
+                return Response.json(createdUser);
+            } catch (error) {
+                console.error(error);
+                return Response.json({ error: 'Failed to create user' }, { status: 500 });
+            }
+        }
+
+    -src > app > register > page.js
+
+        'use client'
+        import React, { useState } from 'react'
+        import Image from 'next/image'
+        import Link from 'next/link'
+
+        const RegisterPage = () => {
+
+        const [email, setEmail] = useState('')
+        const [password, setPassword] = useState('')
+        const [creatingUser, setCreatingUser] = useState(false)
+        const [userCreated, setUserCreated] = useState(false)
+        const [error, setError] = useState(false); 
+
+        async function handleFormSubmit(e){
+            e.preventDefault();
+            setCreatingUser(true);
+            setError(false);
+            setUserCreated(false);
+            
+            const response = await fetch('/api/register',{
+                method: 'POST',
+                body: JSON.stringify({email, password}),
+                headers: {'Content-Type': 'application/json'}
+            })
+            if (response.ok) {
+                setUserCreated(true);
+                setEmail('')
+                setPassword('')
+            }
+            else {
+                setError(true);
+            }
+            setCreatingUser(false);
+        }
+
+        return (
+            <section className='mt-8 mb-8'>
+                <h1 className='text-center text-primary text-4xl'>Register</h1>
+                
+                {userCreated && 
+                    (<div className='my-4 text-center'>
+                        User created.<br/> Now you can <Link className="underline" href={'/login'}>Login &raquo;</Link>
+                    </div>)}
+                
+                {error && (
+                    <div className="my-4 text-center">
+                    An error has occurred.<br />
+                    Please try again later
+                    </div>
+                )}
+
+                <form className='block max-w-xs mx-auto' onSubmit={handleFormSubmit}>
+                    <input disabled={creatingUser} type="email" placeholder='email' value={email} onChange={e=>setEmail(e.target.value)}/>
+                    <input disabled={creatingUser} type="password" placeholder='password' value={password} onChange={e=>setPassword(e.target.value)}/>
+                    <button type="submit">Register</button>
+                    <div className='my-4 text-center text-gray-400'>
+                        or login with provider
+                    </div>
+                    <button disabled={creatingUser} className='flex gap-4 justify-center'>
+                        <Image src={'/google.png'} alt={''} width={24} height={24}/>
+                        Login with google
+                    </button>
+                    <div className="text-center my-4 text-gray-500 border-t pt-4">
+                        Existing account?{' '}
+                        <Link className="underline" href={'/login'}>Login here &raquo;</Link>
+                    </div>
+                </form>
+            </section>
+        )
+        }
+
+        export default RegisterPage
+
+
+            
+
+
 
 
 
